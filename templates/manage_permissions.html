@@ -1,0 +1,256 @@
+{% extends "base.html" %} 
+{% block title %}Manage Permissions - {{ pipeline.name }} - CI/CD Platform{% endblock %}
+
+{% block content %}
+<div class="row mt-4">
+  <div class="col-12">
+    <div class="d-flex align-items-center mb-4">
+      <a
+        href="{{ url_for('web.view_pipeline', pipeline_id=pipeline.id) }}"
+        class="btn btn-outline-secondary me-3"
+      >
+        <i class="bi bi-arrow-left"></i> Back to Pipeline
+      </a>
+      <div class="flex-grow-1">
+        <h2><i class="bi bi-people"></i> Manage Permissions</h2>
+        <p class="text-muted mb-0">
+          Pipeline: <strong>{{ pipeline.name }}</strong>
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <!-- Add New Permission -->
+  <div class="col-lg-4">
+    <div class="card mb-4">
+      <div class="card-header">
+        <h6><i class="bi bi-person-plus"></i> Add User Permission</h6>
+      </div>
+      <div class="card-body">
+        {% if available_users %}
+        <form method="POST" action="{{ url_for('user_mgmt.add_pipeline_permission', pipeline_id=pipeline.id) }}">
+          <div class="mb-3">
+            <label for="user_id" class="form-label">Select User</label>
+            <select class="form-select" name="user_id" id="user_id" required>
+              <option value="">Choose a user...</option>
+              {% for user in available_users %}
+              <option value="{{ user.id }}">{{ user.username }} ({{ user.email }})</option>
+              {% endfor %}
+            </select>
+          </div>
+          
+          <div class="mb-3">
+            <label for="permission_level" class="form-label">Permission Level</label>
+            <select class="form-select" name="permission_level" id="permission_level" required>
+              <option value="">Choose permission level...</option>
+              <option value="reader">Reader - View pipeline and executions</option>
+              <option value="developer">Developer - Trigger pipeline execution</option>
+              <option value="maintainer">Maintainer - Edit pipeline configuration</option>
+            </select>
+          </div>
+          
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Add Permission
+          </button>
+        </form>
+        {% else %}
+        <div class="text-center text-muted">
+          <i class="bi bi-people fs-1"></i>
+          <p class="mt-2">All users already have permissions or no other users exist.</p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- Permission Levels Info -->
+    <div class="card">
+      <div class="card-header">
+        <h6><i class="bi bi-info-circle"></i> Permission Levels</h6>
+      </div>
+      <div class="card-body">
+        <div class="mb-3">
+          <h6 class="text-primary">Reader</h6>
+          <small class="text-muted">
+            • View pipeline details<br>
+            • View execution history<br>
+            • View execution logs
+          </small>
+        </div>
+        
+        <div class="mb-3">
+          <h6 class="text-success">Developer</h6>
+          <small class="text-muted">
+            • All Reader permissions<br>
+            • Trigger manual pipeline execution<br>
+            • Cancel running executions
+          </small>
+        </div>
+        
+        <div class="mb-3">
+          <h6 class="text-warning">Maintainer</h6>
+          <small class="text-muted">
+            • All Developer permissions<br>
+            • Edit pipeline configuration<br>
+            • Update pipeline settings<br>
+            • View webhook tokens
+          </small>
+        </div>
+        
+        <div>
+          <h6 class="text-danger">Owner</h6>
+          <small class="text-muted">
+            • All Maintainer permissions<br>
+            • Delete pipeline<br>
+            • Manage user permissions<br>
+            • Transfer ownership
+          </small>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Current Permissions -->
+  <div class="col-lg-8">
+    <div class="card">
+      <div class="card-header">
+        <h6><i class="bi bi-shield-check"></i> Current Permissions</h6>
+      </div>
+      <div class="card-body">
+        {% if permissions %}
+        <div class="table-responsive">
+          <table class="table table-hover">
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Email</th>
+                <th>Permission Level</th>
+                <th>Granted By</th>
+                <th>Granted On</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- Pipeline Owner (always shown) -->
+              <tr class="table-light">
+                <td>
+                  <strong>{{ pipeline.owner.username }}</strong>
+                  <span class="badge bg-primary ms-2">Owner</span>
+                </td>
+                <td>{{ pipeline.owner.email }}</td>
+                <td>
+                  <span class="badge bg-danger">Owner</span>
+                </td>
+                <td><em>System</em></td>
+                <td>{{ pipeline.created_at.strftime('%Y-%m-%d') }}</td>
+                <td>
+                  <span class="text-muted">Cannot modify</span>
+                </td>
+              </tr>
+              
+              <!-- User Permissions -->
+              {% for permission in permissions %}
+              <tr>
+                <td>{{ permission.user.username }}</td>
+                <td>{{ permission.user.email }}</td>
+                <td>
+                  <span class="badge bg-{% if permission.permission_level == 'reader' %}info{% elif permission.permission_level == 'developer' %}success{% elif permission.permission_level == 'maintainer' %}warning{% else %}danger{% endif %}">
+                    {{ permission.permission_level.title() }}
+                  </span>
+                </td>
+                <td>{{ permission.granted_by_user.username }}</td>
+                <td>{{ permission.created_at.strftime('%Y-%m-%d') }}</td>
+                <td>
+                  <div class="btn-group btn-group-sm" role="group">
+                    <!-- Update Permission -->
+                    <button 
+                      type="button" 
+                      class="btn btn-outline-primary"
+                      data-bs-toggle="modal" 
+                      data-bs-target="#updatePermissionModal{{ permission.id }}"
+                    >
+                      <i class="bi bi-pencil"></i>
+                    </button>
+                    
+                    <!-- Remove Permission -->
+                    <button 
+                      type="button" 
+                      class="btn btn-outline-danger"
+                      data-bs-toggle="modal" 
+                      data-bs-target="#removePermissionModal{{ permission.id }}"
+                    >
+                      <i class="bi bi-trash"></i>
+                    </button>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="text-center py-4 text-muted">
+          <i class="bi bi-shield-x fs-1"></i>
+          <h6 class="mt-3">No Additional Permissions</h6>
+          <p>Only the pipeline owner has access. Add users above to grant access.</p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Update Permission Modals -->
+{% for permission in permissions %}
+<div class="modal fade" id="updatePermissionModal{{ permission.id }}" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Update Permission - {{ permission.user.username }}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="POST" action="{{ url_for('user_mgmt.update_pipeline_permission', pipeline_id=pipeline.id, permission_id=permission.id) }}">
+        <div class="modal-body">
+          <div class="mb-3">
+            <label for="permission_level_{{ permission.id }}" class="form-label">Permission Level</label>
+            <select class="form-select" name="permission_level" id="permission_level_{{ permission.id }}" required>
+              <option value="reader" {% if permission.permission_level == 'reader' %}selected{% endif %}>Reader</option>
+              <option value="developer" {% if permission.permission_level == 'developer' %}selected{% endif %}>Developer</option>
+              <option value="maintainer" {% if permission.permission_level == 'maintainer' %}selected{% endif %}>Maintainer</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary">Update Permission</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Remove Permission Modal -->
+<div class="modal fade" id="removePermissionModal{{ permission.id }}" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Remove Permission</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p>Are you sure you want to remove <strong>{{ permission.user.username }}</strong>'s access to this pipeline?</p>
+        <p class="text-muted">This action cannot be undone. The user will lose all access to this pipeline immediately.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <form method="POST" action="{{ url_for('user_mgmt.remove_pipeline_permission', pipeline_id=pipeline.id, permission_id=permission.id) }}" style="display: inline;">
+          <button type="submit" class="btn btn-danger">Remove Access</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endfor %}
+
+{% endblock %}

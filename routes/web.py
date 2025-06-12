@@ -1,277 +1,319 @@
-from flask import Blueprint, render_template, request, redirect, url_for, flash, session, jsonify
-from models.user import User
-from models.pipeline import Pipeline, PipelineConfiguration, PipelineExecution
+from flask import Blueprint, request, jsonify, current_app
+from models.pipeline import Pipeline, PipelineExecution
 from services.pipeline_executor import PipelineExecutor
-from routes.user_management import get_user_accessible_pipelines, check_pipeline_permission
 from extensions import db
 from datetime import datetime
-import functools
+import json
+import hmac
+import hashlib
+import logging
 
-def login_required(f):
-    """Decorator to require login for web routes"""
-    @functools.wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'user_id' not in session:
-            return redirect(url_for('web.login'))
-        return f(*args, **kwargs)
-    return decorated_function
+webhook_bp = Blueprint('webhook', __name__)
 
-web_bp = Blueprint('web', __name__)
-
-@web_bp.route('/')
-def index():
-    if 'user_id' in session:
-        return redirect(url_for('web.dashboard'))
-    return redirect(url_for('web.login'))
-
-@web_bp.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        
-        if not username or not password:
-            flash('Please enter both username and password', 'error')
-            return render_template('login.html')
-        
-        user = User.query.filter_by(username=username).first()
-        
-        if user and user.check_password(password):
-            session['user_id'] = user.id
-            session['username'] = user.username
-            flash(f'Welcome back, {user.username}!', 'success')
-            return redirect(url_for('web.dashboard'))
-        else:
-            flash('Invalid username or password', 'error')
+def verify_github_signature(payload_body, secret_token, signature_header):
+    """Verify GitHub webhook signature"""
+    if not secret_token:
+        return True  # No verification if no secret is configured
     
-    return render_template('login.html')
+    if not signature_header:
+        return False
+    
+    # GitHub sends signature as "sha256=<hash>"
+    if not signature_header.startswith('sha256='):
+        return False
+    
+    signature = signature_header[7:]  # Remove "sha256=" prefix
+    
+    # Calculate expected signature
+    expected_signature = hmac.new(
+        secret_token.encode('utf-8'),
+        payload_body,
+        hashlib.sha256
+    ).hexdigest()
+    
+    return hmac.compare_digest(signature, expected_signature)
 
-@web_bp.route('/signup', methods=['GET', 'POST'])
-def signup():
-    if request.method == 'POST':
-        username = request.form.get('username')
-        email = request.form.get('email')
-        password = request.form.get('password')
-        confirm_password = request.form.get('confirm_password')
+def extract_repository_info(payload):
+    """Extract repository information from webhook payload"""
+    try:
+        repo_data = {}
         
-        # Validation
-        if not all([username, email, password, confirm_password]):
-            flash('All fields are required', 'error')
-            return render_template('signup.html')
+        # GitHub webhook format
+        if 'repository' in payload:
+            repository = payload['repository']
+            repo_data.update({
+                'name': repository.get('name'),
+                'full_name': repository.get('full_name'),
+                'clone_url': repository.get('clone_url'),
+                'ssh_url': repository.get('ssh_url'),
+                'default_branch': repository.get('default_branch', 'main'),
+                'ref': payload.get('ref', '').replace('refs/heads/', ''),
+                'commits': payload.get('commits', []),
+                'pusher': payload.get('pusher', {}).get('name', 'unknown'),
+                'head_commit': payload.get('head_commit', {})
+            })
         
-        if password != confirm_password:
-            flash('Passwords do not match', 'error')
-            return render_template('signup.html')
+        # GitLab webhook format
+        elif 'project' in payload:
+            project = payload['project']
+            repo_data.update({
+                'name': project.get('name'),
+                'full_name': project.get('path_with_namespace'),
+                'clone_url': project.get('http_url'),
+                'ssh_url': project.get('ssh_url'),
+                'default_branch': project.get('default_branch', 'main'),
+                'ref': payload.get('ref', '').replace('refs/heads/', ''),
+                'commits': payload.get('commits', []),
+                'pusher': payload.get('user_name', 'unknown'),
+                'head_commit': payload.get('commits', [{}])[-1] if payload.get('commits') else {}
+            })
         
-        if len(password) < 6:
-            flash('Password must be at least 6 characters long', 'error')
-            return render_template('signup.html')
-        
-        # Check if user exists
-        if User.query.filter_by(username=username).first():
-            flash('Username already exists', 'error')
-            return render_template('signup.html')
-        
-        if User.query.filter_by(email=email).first():
-            flash('Email already exists', 'error')
-            return render_template('signup.html')
-        
-        # Create new user
-        try:
-            user = User(username=username, email=email)
-            user.set_password(password)
-            db.session.add(user)
-            db.session.commit()
+        # Bitbucket webhook format
+        elif 'repository' in payload and 'push' in payload:
+            repository = payload['repository']
+            push = payload['push']
+            changes = push.get('changes', [{}])[0] if push.get('changes') else {}
             
-            flash('Account created successfully! Please log in.', 'success')
-            return redirect(url_for('web.login'))
-        except Exception as e:
-            db.session.rollback()
-            flash('An error occurred while creating your account', 'error')
-    
-    return render_template('signup.html')
-
-@web_bp.route('/dashboard')
-@login_required
-def dashboard():
-    user_id = session['user_id']
-    user = User.query.get(user_id)
-    
-    # Get pipelines user can access (owned + permitted)
-    pipelines = get_user_accessible_pipelines(user_id)
-    
-    # Get recent executions for accessible pipelines
-    pipeline_ids = [p.id for p in pipelines]
-    recent_executions = []
-    if pipeline_ids:
-        recent_executions = PipelineExecution.query.filter(
-            PipelineExecution.pipeline_id.in_(pipeline_ids)
-        ).order_by(PipelineExecution.started_at.desc()).limit(5).all()
-    
-    return render_template('dashboard.html', 
-                         user=user, 
-                         pipelines=pipelines, 
-                         recent_executions=recent_executions)
-
-@web_bp.route('/pipelines/new', methods=['GET', 'POST'])
-@login_required
-def create_pipeline():
-    if request.method == 'POST':
-        name = request.form.get('name')
-        description = request.form.get('description')
-        yaml_source = request.form.get('yaml_source')
+            repo_data.update({
+                'name': repository.get('name'),
+                'full_name': repository.get('full_name'),
+                'clone_url': repository.get('links', {}).get('clone', [{}])[0].get('href'),
+                'default_branch': repository.get('mainbranch', {}).get('name', 'main'),
+                'ref': changes.get('new', {}).get('name', ''),
+                'commits': changes.get('commits', []),
+                'pusher': payload.get('actor', {}).get('display_name', 'unknown')
+            })
         
-        if not name:
-            flash('Pipeline name is required', 'error')
-            return render_template('create_pipeline.html')
+        return repo_data
         
-        try:
-            # Create pipeline
-            pipeline = Pipeline(
-                owner_id=session['user_id'],
-                name=name,
-                description=description or ''
-            )
-            db.session.add(pipeline)
-            db.session.flush()
-            
-            # Create configuration
-            config = PipelineConfiguration(
-                pipeline_id=pipeline.id,
-                yaml_source=yaml_source
-            )
-            
-            if yaml_source == 'editor':
-                config.yaml_content = request.form.get('yaml_content', '')
-            else:  # repo
-                config.repo_url = request.form.get('repo_url', '')
-                config.repo_branch = request.form.get('repo_branch', 'main')
-                config.yaml_file_path = request.form.get('yaml_file_path', 'pipeline.yml')
-            
-            db.session.add(config)
-            db.session.commit()
-            
-            flash(f'Pipeline "{name}" created successfully!', 'success')
-            return redirect(url_for('web.dashboard'))
-            
-        except Exception as e:
-            db.session.rollback()
-            flash('An error occurred while creating the pipeline', 'error')
-    
-    return render_template('create_pipeline.html')
+    except Exception as e:
+        current_app.logger.warning(f"Failed to extract repository info: {e}")
+        return {}
 
-@web_bp.route('/pipelines/<int:pipeline_id>')
-@login_required
-def view_pipeline(pipeline_id):
-    # Check if user has permission to view this pipeline
-    has_permission, permission_level = check_pipeline_permission(session['user_id'], pipeline_id, 'reader')
-    
-    if not has_permission:
-        flash('Pipeline not found or you do not have permission to view it', 'error')
-        return redirect(url_for('web.dashboard'))
-    
-    pipeline = Pipeline.query.get(pipeline_id)
-    config = pipeline.get_active_configuration()
-    executions = PipelineExecution.query.filter_by(pipeline_id=pipeline_id).order_by(
-        PipelineExecution.started_at.desc()
-    ).limit(10).all()
-    
-    # Check if user is owner (for showing manage permissions link)
-    is_owner = pipeline.owner_id == session['user_id']
-    
-    return render_template('view_pipeline.html', 
-                         pipeline=pipeline, 
-                         config=config, 
-                         executions=executions,
-                         is_owner=is_owner,
-                         permission_level=permission_level)
-
-@web_bp.route('/pipelines/<int:pipeline_id>/trigger', methods=['POST'])
-@login_required
-def trigger_pipeline_manual(pipeline_id):
-    # Check if user has permission to trigger this pipeline
-    has_permission, permission_level = check_pipeline_permission(session['user_id'], pipeline_id, 'developer')
-    
-    if not has_permission:
-        flash('Pipeline not found or you do not have permission to trigger it', 'error')
-        return redirect(url_for('web.dashboard'))
-    
-    pipeline = Pipeline.query.get(pipeline_id)
-    config = pipeline.get_active_configuration()
-    
-    if not config:
-        flash('No active configuration found', 'error')
-        return redirect(url_for('web.view_pipeline', pipeline_id=pipeline_id))
+@webhook_bp.route('/<string:pipeline_token>', methods=['POST'])
+def trigger_pipeline(pipeline_token):
+    """Trigger pipeline execution via webhook"""
+    start_time = datetime.utcnow()
     
     try:
+        # Validate pipeline token
+        if not pipeline_token or len(pipeline_token) < 10:
+            current_app.logger.warning(f"Invalid pipeline token format: {pipeline_token[:10]}...")
+            return jsonify({'error': 'Invalid pipeline token'}), 400
+        
+        # Find pipeline by trigger token
+        pipeline = Pipeline.query.filter_by(trigger_token=pipeline_token).first()
+        
+        if not pipeline:
+            current_app.logger.warning(f"Pipeline not found for token: {pipeline_token[:10]}...")
+            return jsonify({'error': 'Pipeline not found'}), 404
+        
+        if not pipeline.is_active:
+            current_app.logger.warning(f"Pipeline {pipeline.name} is not active")
+            return jsonify({'error': 'Pipeline is not active'}), 403
+        
+        # Get active configuration
+        config = pipeline.get_active_configuration()
+        if not config:
+            current_app.logger.error(f"No active configuration for pipeline {pipeline.name}")
+            return jsonify({'error': 'No active pipeline configuration'}), 400
+        
+        # Parse webhook payload
+        try:
+            payload = request.get_json(force=True) if request.get_data() else {}
+        except Exception as e:
+            current_app.logger.warning(f"Failed to parse webhook payload: {e}")
+            payload = {}
+        
+        # Extract repository information for logging
+        repo_info = extract_repository_info(payload)
+        
+        # Verify signature for GitHub webhooks (optional)
+        github_signature = request.headers.get('X-Hub-Signature-256')
+        if github_signature:
+            # This would require the pipeline to have a webhook secret configured
+            # For now, we'll just log it
+            current_app.logger.info(f"GitHub webhook signature present for pipeline {pipeline.name}")
+        
+        # Log webhook details
+        current_app.logger.info(f"Webhook received for pipeline '{pipeline.name}' from {request.remote_addr}")
+        if repo_info.get('full_name'):
+            current_app.logger.info(f"Repository: {repo_info['full_name']}, Branch: {repo_info.get('ref', 'unknown')}")
+        if repo_info.get('pusher'):
+            current_app.logger.info(f"Pushed by: {repo_info['pusher']}")
+        
+        # Create execution record
+        execution_metadata = {
+            'webhook_source': request.headers.get('User-Agent', 'unknown'),
+            'remote_addr': request.remote_addr,
+            'repository_info': repo_info,
+            'payload_size': len(request.get_data()),
+            'headers': dict(request.headers),
+            'received_at': start_time.isoformat()
+        }
+        
         execution = PipelineExecution(
             pipeline_id=pipeline.id,
             configuration_id=config.id,
-            triggered_by_user_id=session['user_id'],
-            trigger_method='manual',
+            trigger_method='webhook',
             status='pending',
-            started_at=datetime.utcnow()
+            started_at=start_time,
+            execution_metadata=execution_metadata
         )
+        
         db.session.add(execution)
         db.session.commit()
         
-        # Execute pipeline asynchronously
-        executor = PipelineExecutor()
-        executor.execute_async(execution.id)
+        current_app.logger.info(f"Created execution {execution.id} for pipeline {pipeline.name}")
         
-        flash('Pipeline triggered successfully!', 'success')
+        # Execute pipeline asynchronously
+        try:
+            executor = PipelineExecutor()
+            thread = executor.execute_async(execution.id)
+            
+            response_data = {
+                'message': 'Pipeline triggered successfully',
+                'execution_id': execution.id,
+                'pipeline_name': pipeline.name,
+                'pipeline_id': pipeline.id,
+                'status': 'pending',
+                'triggered_at': start_time.isoformat()
+            }
+            
+            # Include repository info in response if available
+            if repo_info:
+                response_data['repository'] = {
+                    'name': repo_info.get('name'),
+                    'branch': repo_info.get('ref'),
+                    'pusher': repo_info.get('pusher')
+                }
+            
+            current_app.logger.info(f"Pipeline {pipeline.name} execution started successfully")
+            return jsonify(response_data), 200
+            
+        except Exception as e:
+            # Update execution status on error
+            execution.status = 'failed'
+            execution.error_message = f"Failed to start execution: {str(e)}"
+            execution.completed_at = datetime.utcnow()
+            db.session.commit()
+            
+            current_app.logger.error(f"Failed to start execution for pipeline {pipeline.name}: {e}")
+            
+            return jsonify({
+                'error': 'Failed to start pipeline execution',
+                'execution_id': execution.id,
+                'details': str(e)
+            }), 500
+            
+    except Exception as e:
+        current_app.logger.error(f"Webhook error: {e}")
+        return jsonify({
+            'error': 'Internal server error',
+            'details': str(e) if current_app.debug else 'Please contact administrator'
+        }), 500
+
+@webhook_bp.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint for monitoring"""
+    try:
+        # Check database connectivity
+        db.session.execute('SELECT 1')
+        
+        # Check if Docker is available
+        executor = PipelineExecutor()
+        docker_status = "available" if executor.docker_available else "unavailable"
+        
+        # Basic system info
+        import psutil
+        system_info = {
+            'cpu_percent': psutil.cpu_percent(interval=1),
+            'memory_percent': psutil.virtual_memory().percent,
+            'disk_percent': psutil.disk_usage('/').percent
+        }
+        
+        return jsonify({
+            'status': 'healthy',
+            'timestamp': datetime.utcnow().isoformat(),
+            'service': 'CI/CD Pipeline Platform',
+            'version': '1.0.0',
+            'database': 'connected',
+            'docker': docker_status,
+            'system': system_info
+        }), 200
         
     except Exception as e:
-        db.session.rollback()
-        flash(f'Failed to trigger pipeline: {str(e)}', 'error')
-    
-    return redirect(url_for('web.view_pipeline', pipeline_id=pipeline_id))
+        current_app.logger.error(f"Health check failed: {e}")
+        return jsonify({
+            'status': 'unhealthy',
+            'timestamp': datetime.utcnow().isoformat(),
+            'error': str(e)
+        }), 503
 
-@web_bp.route('/pipelines/<int:pipeline_id>/executions/<int:execution_id>')
-@login_required
-def view_execution(pipeline_id, execution_id):
-    """View detailed execution logs"""
-    # Check if user has permission to view this pipeline
-    has_permission, permission_level = check_pipeline_permission(session['user_id'], pipeline_id, 'reader')
-    
-    if not has_permission:
-        flash('Pipeline not found or you do not have permission to view it', 'error')
-        return redirect(url_for('web.dashboard'))
-    
-    pipeline = Pipeline.query.get(pipeline_id)
-    execution = PipelineExecution.query.filter_by(id=execution_id, pipeline_id=pipeline_id).first()
-    
-    if not execution:
-        flash('Execution not found', 'error')
-        return redirect(url_for('web.view_pipeline', pipeline_id=pipeline_id))
-    
-    return render_template('view_execution.html', pipeline=pipeline, execution=execution)
+@webhook_bp.route('/stats', methods=['GET'])
+def webhook_stats():
+    """Get webhook and execution statistics"""
+    try:
+        # Get basic statistics
+        from sqlalchemy import func
+        from models.pipeline import PipelineExecution
+        
+        stats = db.session.query(
+            func.count(PipelineExecution.id).label('total_executions'),
+            func.count(PipelineExecution.id).filter(
+                PipelineExecution.status == 'success'
+            ).label('successful_executions'),
+            func.count(PipelineExecution.id).filter(
+                PipelineExecution.status == 'failed'
+            ).label('failed_executions'),
+            func.count(PipelineExecution.id).filter(
+                PipelineExecution.trigger_method == 'webhook'
+            ).label('webhook_executions'),
+            func.count(PipelineExecution.id).filter(
+                PipelineExecution.trigger_method == 'manual'
+            ).label('manual_executions')
+        ).first()
+        
+        # Recent activity (last 24 hours)
+        from datetime import timedelta
+        recent_cutoff = datetime.utcnow() - timedelta(hours=24)
+        
+        recent_stats = db.session.query(
+            func.count(PipelineExecution.id).label('recent_executions')
+        ).filter(
+            PipelineExecution.started_at >= recent_cutoff
+        ).first()
+        
+        return jsonify({
+            'total_executions': stats.total_executions,
+            'successful_executions': stats.successful_executions,
+            'failed_executions': stats.failed_executions,
+            'webhook_executions': stats.webhook_executions,
+            'manual_executions': stats.manual_executions,
+            'recent_executions_24h': recent_stats.recent_executions,
+            'success_rate': round(
+                (stats.successful_executions / max(stats.total_executions, 1)) * 100, 2
+            ),
+            'timestamp': datetime.utcnow().isoformat()
+        }), 200
+        
+    except Exception as e:
+        current_app.logger.error(f"Stats query failed: {e}")
+        return jsonify({'error': 'Failed to retrieve statistics'}), 500
 
-@web_bp.route('/api/executions/<int:execution_id>/status')
-@login_required
-def get_execution_status(execution_id):
-    """API endpoint to get execution status (for polling)"""
-    execution = PipelineExecution.query.get(execution_id)
-    
-    if not execution:
-        return jsonify({'error': 'Execution not found'}), 404
-    
-    # Check if user has permission to view this pipeline
-    has_permission, _ = check_pipeline_permission(session['user_id'], execution.pipeline_id, 'reader')
-    
-    if not has_permission:
-        return jsonify({'error': 'Permission denied'}), 403
-    
+@webhook_bp.errorhandler(404)
+def webhook_not_found(e):
+    """Custom 404 handler for webhook endpoints"""
     return jsonify({
-        'id': execution.id,
-        'status': execution.status,
-        'started_at': execution.started_at.isoformat() if execution.started_at else None,
-        'completed_at': execution.completed_at.isoformat() if execution.completed_at else None,
-        'error_message': execution.error_message
-    })
+        'error': 'Webhook endpoint not found',
+        'message': 'Please check your pipeline token and try again'
+    }), 404
 
-@web_bp.route('/logout')
-def logout():
-    session.clear()
-    flash('You have been logged out', 'info')
-    return redirect(url_for('web.login'))
+@webhook_bp.errorhandler(500)
+def webhook_server_error(e):
+    """Custom 500 handler for webhook endpoints"""
+    current_app.logger.error(f"Webhook server error: {e}")
+    return jsonify({
+        'error': 'Internal server error',
+        'message': 'Please try again later or contact administrator'
+    }), 500

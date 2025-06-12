@@ -16,6 +16,9 @@ Platform{% endblock %} {% block content %}
         </p>
       </div>
       <div class="d-flex gap-2">
+        <!-- Trigger Pipeline Button (Developer+ permission) -->
+        {% if permission_level in ['developer', 'maintainer', 'owner'] or
+        is_owner %}
         <form
           method="POST"
           action="{{ url_for('web.trigger_pipeline_manual', pipeline_id=pipeline.id) }}"
@@ -25,6 +28,18 @@ Platform{% endblock %} {% block content %}
             <i class="bi bi-play"></i> Trigger Pipeline
           </button>
         </form>
+        {% endif %}
+
+        <!-- Manage Permissions Button (Owner only) -->
+        {% if is_owner %}
+        <a
+          href="{{ url_for('user_mgmt.manage_pipeline_permissions', pipeline_id=pipeline.id) }}"
+          class="btn btn-outline-primary"
+        >
+          <i class="bi bi-people"></i> Manage Access
+        </a>
+        {% endif %}
+
         <span
           class="badge bg-{{ 'success' if pipeline.is_active else 'secondary' }} fs-6"
         >
@@ -66,6 +81,9 @@ Platform{% endblock %} {% block content %}
             <td><code>{{ config.yaml_file_path }}</code></td>
           </tr>
           {% endif %}
+
+          <!-- Show webhook info for maintainer+ permission -->
+          {% if permission_level in ['maintainer', 'owner'] or is_owner %}
           <tr>
             <th>Trigger Token:</th>
             <td>
@@ -93,9 +111,11 @@ Platform{% endblock %} {% block content %}
               </button>
             </td>
           </tr>
+          {% endif %}
         </table>
 
-        {% if config.yaml_source == 'editor' and config.yaml_content %}
+        {% if config.yaml_source == 'editor' and config.yaml_content and
+        (permission_level in ['maintainer', 'owner'] or is_owner) %}
         <h6 class="mt-3">YAML Content:</h6>
         <pre
           class="bg-light p-3 rounded"
@@ -105,6 +125,31 @@ Platform{% endblock %} {% block content %}
         {% endif %}
       </div>
     </div>
+
+    <!-- Permission Info Card -->
+    {% if not is_owner %}
+    <div class="card">
+      <div class="card-header">
+        <h6><i class="bi bi-shield-check"></i> Your Access Level</h6>
+      </div>
+      <div class="card-body">
+        <p class="mb-2">
+          <span
+            class="badge bg-{% if permission_level == 'reader' %}info{% elif permission_level == 'developer' %}success{% elif permission_level == 'maintainer' %}warning{% else %}danger{% endif %} fs-6"
+          >
+            {{ permission_level.title() if permission_level else 'Reader' }}
+          </span>
+        </p>
+        <small class="text-muted">
+          {% if permission_level == 'reader' %} You can view this pipeline and
+          its execution history. {% elif permission_level == 'developer' %} You
+          can view this pipeline and trigger manual executions. {% elif
+          permission_level == 'maintainer' %} You can view, trigger, and edit
+          this pipeline configuration. {% endif %}
+        </small>
+      </div>
+    </div>
+    {% endif %}
   </div>
 
   <div class="col-lg-6">
@@ -122,6 +167,7 @@ Platform{% endblock %} {% block content %}
                 <th>Status</th>
                 <th>Trigger</th>
                 <th>Started</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -138,8 +184,17 @@ Platform{% endblock %} {% block content %}
                 <td><small>{{ execution.trigger_method.title() }}</small></td>
                 <td>
                   <small
-                    >{{ execution.started_at.strftime('%m/%d %H:%M') }}</small
+                    >{{ execution.started_at.strftime('%m/%d %H:%M') if
+                    execution.started_at else 'N/A' }}</small
                   >
+                </td>
+                <td>
+                  <a
+                    href="{{ url_for('web.view_execution', pipeline_id=pipeline.id, execution_id=execution.id) }}"
+                    class="btn btn-sm btn-outline-primary"
+                  >
+                    <i class="bi bi-eye"></i>
+                  </a>
                 </td>
               </tr>
               {% endfor %}
