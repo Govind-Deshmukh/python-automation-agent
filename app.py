@@ -22,7 +22,7 @@ def create_app():
     jwt.init_app(app)
     
     # Import models here to avoid circular imports
-    from models import user, pipeline
+    from models import User, Pipeline, PipelineConfiguration, PipelineExecution, PipelinePermission
     
     # Register blueprints
     from routes.auth import auth_bp
@@ -40,4 +40,3 @@ def create_app():
 if __name__ == '__main__':
     app = create_app()
     app.run(debug=True)
-
