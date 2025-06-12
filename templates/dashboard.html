@@ -1,0 +1,162 @@
+{% extends "base.html" %} {% block title %}Dashboard - CI/CD Platform{% endblock
+%} {% block content %}
+<div class="row mt-4">
+  <div class="col-12">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <h2>
+        <i class="bi bi-speedometer2"></i> Dashboard
+        <span class="text-muted fs-5">Welcome, {{ user.username }}!</span>
+      </h2>
+      <a href="{{ url_for('web.create_pipeline') }}" class="btn btn-primary">
+        <i class="bi bi-plus-circle"></i> New Pipeline
+      </a>
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <!-- Statistics Cards -->
+  <div class="col-md-3 mb-3">
+    <div class="card text-center">
+      <div class="card-body">
+        <i class="bi bi-diagram-3 fs-1 text-primary"></i>
+        <h3 class="mt-2">{{ pipelines|length }}</h3>
+        <p class="text-muted">Total Pipelines</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-3 mb-3">
+    <div class="card text-center">
+      <div class="card-body">
+        <i class="bi bi-play-circle fs-1 text-success"></i>
+        <h3 class="mt-2">{{ recent_executions|length }}</h3>
+        <p class="text-muted">Recent Runs</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-3 mb-3">
+    <div class="card text-center">
+      <div class="card-body">
+        <i class="bi bi-check-circle fs-1 text-success"></i>
+        <h3 class="mt-2">
+          {{ recent_executions|selectattr("status", "equalto",
+          "success")|list|length }}
+        </h3>
+        <p class="text-muted">Successful</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-3 mb-3">
+    <div class="card text-center">
+      <div class="card-body">
+        <i class="bi bi-x-circle fs-1 text-danger"></i>
+        <h3 class="mt-2">
+          {{ recent_executions|selectattr("status", "equalto",
+          "failed")|list|length }}
+        </h3>
+        <p class="text-muted">Failed</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <!-- Pipelines List -->
+  <div class="col-lg-8">
+    <div class="card">
+      <div class="card-header">
+        <h5><i class="bi bi-diagram-3"></i> Your Pipelines</h5>
+      </div>
+      <div class="card-body">
+        {% if pipelines %}
+        <div class="row">
+          {% for pipeline in pipelines %}
+          <div class="col-md-6 mb-3">
+            <div class="card pipeline-card h-100">
+              <div class="card-body">
+                <div
+                  class="d-flex justify-content-between align-items-start mb-2"
+                >
+                  <h6 class="card-title">{{ pipeline.name }}</h6>
+                  <span
+                    class="badge bg-{{ 'success' if pipeline.is_active else 'secondary' }}"
+                  >
+                    {{ 'Active' if pipeline.is_active else 'Inactive' }}
+                  </span>
+                </div>
+                <p class="card-text text-muted small">
+                  {{ pipeline.description or 'No description' }}
+                </p>
+                <div class="d-flex gap-2">
+                  <a
+                    href="{{ url_for('web.view_pipeline', pipeline_id=pipeline.id) }}"
+                    class="btn btn-sm btn-outline-primary"
+                  >
+                    <i class="bi bi-eye"></i> View
+                  </a>
+                  <form
+                    method="POST"
+                    action="{{ url_for('web.trigger_pipeline_manual', pipeline_id=pipeline.id) }}"
+                    style="display: inline"
+                  >
+                    <button type="submit" class="btn btn-sm btn-success">
+                      <i class="bi bi-play"></i> Run
+                    </button>
+                  </form>
+                </div>
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-center py-4">
+          <i class="bi bi-diagram-3 fs-1 text-muted"></i>
+          <h5 class="mt-3">No Pipelines Yet</h5>
+          <p class="text-muted">Create your first pipeline to get started</p>
+          <a
+            href="{{ url_for('web.create_pipeline') }}"
+            class="btn btn-primary"
+          >
+            <i class="bi bi-plus-circle"></i> Create Pipeline
+          </a>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Recent Activity -->
+  <div class="col-lg-4">
+    <div class="card">
+      <div class="card-header">
+        <h5><i class="bi bi-clock-history"></i> Recent Activity</h5>
+      </div>
+      <div class="card-body">
+        {% if recent_executions %} {% for execution in recent_executions %}
+        <div
+          class="d-flex justify-content-between align-items-center mb-3 pb-2 border-bottom"
+        >
+          <div>
+            <h6 class="mb-1">{{ execution.pipeline.name }}</h6>
+            <small class="text-muted">
+              {{ execution.started_at.strftime('%m/%d %H:%M') }}
+            </small>
+          </div>
+          <span
+            class="badge status-badge bg-{% if execution.status == 'success' %}success{% elif execution.status == 'failed' %}danger{% elif execution.status == 'running' %}warning{% else %}secondary{% endif %}"
+          >
+            {{ execution.status.title() }}
+          </span>
+        </div>
+        {% endfor %} {% else %}
+        <p class="text-muted text-center">No recent activity</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

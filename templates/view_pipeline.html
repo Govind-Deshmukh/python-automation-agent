@@ -1,0 +1,180 @@
+% extends "base.html" %} {% block title %}{{ pipeline.name }} - CI/CD Platform{%
+endblock %} {% block content %}
+<div class="row mt-4">
+  <div class="col-12">
+    <div class="d-flex align-items-center mb-4">
+      <a
+        href="{{ url_for('web.dashboard') }}"
+        class="btn btn-outline-secondary me-3"
+      >
+        <i class="bi bi-arrow-left"></i> Back
+      </a>
+      <div class="flex-grow-1">
+        <h2><i class="bi bi-diagram-3"></i> {{ pipeline.name }}</h2>
+        <p class="text-muted mb-0">
+          {{ pipeline.description or 'No description' }}
+        </p>
+      </div>
+      <div class="d-flex gap-2">
+        <form
+          method="POST"
+          action="{{ url_for('web.trigger_pipeline_manual', pipeline_id=pipeline.id) }}"
+          style="display: inline"
+        >
+          <button type="submit" class="btn btn-success">
+            <i class="bi bi-play"></i> Trigger Pipeline
+          </button>
+        </form>
+        <span
+          class="badge bg-{{ 'success' if pipeline.is_active else 'secondary' }} fs-6"
+        >
+          {{ 'Active' if pipeline.is_active else 'Inactive' }}
+        </span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="col-lg-6">
+    <div class="card mb-4">
+      <div class="card-header">
+        <h5><i class="bi bi-gear"></i> Pipeline Configuration</h5>
+      </div>
+      <div class="card-body">
+        {% if config %}
+        <table class="table table-sm">
+          <tr>
+            <th width="30%">Source:</th>
+            <td>
+              <span class="badge bg-info"
+                >{{ config.yaml_source.title() }}</span
+              >
+            </td>
+          </tr>
+          {% if config.yaml_source == 'repo' %}
+          <tr>
+            <th>Repository:</th>
+            <td><code>{{ config.repo_url }}</code></td>
+          </tr>
+          <tr>
+            <th>Branch:</th>
+            <td><code>{{ config.repo_branch }}</code></td>
+          </tr>
+          <tr>
+            <th>YAML Path:</th>
+            <td><code>{{ config.yaml_file_path }}</code></td>
+          </tr>
+          {% endif %}
+          <tr>
+            <th>Trigger Token:</th>
+            <td>
+              <code class="user-select-all">{{ pipeline.trigger_token }}</code>
+              <button
+                class="btn btn-sm btn-outline-secondary ms-2"
+                onclick="copyToken()"
+              >
+                <i class="bi bi-copy"></i>
+              </button>
+            </td>
+          </tr>
+          <tr>
+            <th>Webhook URL:</th>
+            <td>
+              <code class="user-select-all"
+                >{{ request.host_url }}webhook/{{ pipeline.trigger_token
+                }}</code
+              >
+              <button
+                class="btn btn-sm btn-outline-secondary ms-2"
+                onclick="copyWebhook()"
+              >
+                <i class="bi bi-copy"></i>
+              </button>
+            </td>
+          </tr>
+        </table>
+
+        {% if config.yaml_source == 'editor' and config.yaml_content %}
+        <h6 class="mt-3">YAML Content:</h6>
+        <pre
+          class="bg-light p-3 rounded"
+        ><code>{{ config.yaml_content }}</code></pre>
+        {% endif %} {% else %}
+        <p class="text-muted">No configuration found</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card">
+      <div class="card-header">
+        <h5><i class="bi bi-clock-history"></i> Execution History</h5>
+      </div>
+      <div class="card-body">
+        {% if executions %}
+        <div class="table-responsive">
+          <table class="table table-hover">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Status</th>
+                <th>Trigger</th>
+                <th>Started</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for execution in executions %}
+              <tr>
+                <td><small>#{{ execution.id }}</small></td>
+                <td>
+                  <span
+                    class="badge bg-{% if execution.status == 'success' %}success{% elif execution.status == 'failed' %}danger{% elif execution.status == 'running' %}warning{% else %}secondary{% endif %}"
+                  >
+                    {{ execution.status.title() }}
+                  </span>
+                </td>
+                <td><small>{{ execution.trigger_method.title() }}</small></td>
+                <td>
+                  <small
+                    >{{ execution.started_at.strftime('%m/%d %H:%M') }}</small
+                  >
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="text-center py-4">
+          <i class="bi bi-clock-history fs-1 text-muted"></i>
+          <h6 class="mt-3">No Executions Yet</h6>
+          <p class="text-muted">
+            Trigger the pipeline to see execution history
+          </p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block scripts %}
+<script>
+  function copyToken() {
+    const token = "{{ pipeline.trigger_token }}";
+    navigator.clipboard.writeText(token).then(() => {
+      // You could add a toast notification here
+      alert("Token copied to clipboard!");
+    });
+  }
+
+  function copyWebhook() {
+    const webhook =
+      "{{ request.host_url }}webhook/{{ pipeline.trigger_token }}";
+    navigator.clipboard.writeText(webhook).then(() => {
+      alert("Webhook URL copied to clipboard!");
+    });
+  }
+</script>
+{% endblock %}

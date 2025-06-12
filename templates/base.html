@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{% block title %}CI/CD Pipeline Platform{% endblock %}</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css"
+      rel="stylesheet"
+    />
+    <style>
+      .sidebar {
+        min-height: 100vh;
+        background-color: #f8f9fa;
+      }
+      .pipeline-card {
+        transition: transform 0.2s;
+      }
+      .pipeline-card:hover {
+        transform: translateY(-2px);
+      }
+      .status-badge {
+        font-size: 0.8em;
+      }
+    </style>
+  </head>
+  <body>
+    {% if session.user_id %}
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+      <div class="container-fluid">
+        <a class="navbar-brand" href="{{ url_for('web.dashboard') }}">
+          <i class="bi bi-gear-fill"></i> CI/CD Platform
+        </a>
+
+        <div class="navbar-nav ms-auto">
+          <div class="nav-item dropdown">
+            <a
+              class="nav-link dropdown-toggle"
+              href="#"
+              role="button"
+              data-bs-toggle="dropdown"
+            >
+              <i class="bi bi-person-circle"></i> {{ session.username }}
+            </a>
+            <ul class="dropdown-menu">
+              <li>
+                <a class="dropdown-item" href="{{ url_for('web.logout') }}">
+                  <i class="bi bi-box-arrow-right"></i> Logout
+                </a>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </nav>
+    {% endif %}
+
+    <div class="container-fluid">
+      {% with messages = get_flashed_messages(with_categories=true) %} {% if
+      messages %} {% for category, message in messages %}
+      <div
+        class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show mt-3"
+        role="alert"
+      >
+        {{ message }}
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="alert"
+        ></button>
+      </div>
+      {% endfor %} {% endif %} {% endwith %} {% block content %}{% endblock %}
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

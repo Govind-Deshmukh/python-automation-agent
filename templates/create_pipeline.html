@@ -1,0 +1,200 @@
+{% extends "base.html" %} {% block title %}Create Pipeline - CI/CD Platform{%
+endblock %} {% block content %}
+<div class="row mt-4">
+  <div class="col-12">
+    <div class="d-flex align-items-center mb-4">
+      <a
+        href="{{ url_for('web.dashboard') }}"
+        class="btn btn-outline-secondary me-3"
+      >
+        <i class="bi bi-arrow-left"></i> Back
+      </a>
+      <h2><i class="bi bi-plus-circle"></i> Create New Pipeline</h2>
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="col-lg-8">
+    <div class="card">
+      <div class="card-body">
+        <form method="POST">
+          <div class="mb-3">
+            <label for="name" class="form-label">Pipeline Name *</label>
+            <input
+              type="text"
+              class="form-control"
+              id="name"
+              name="name"
+              required
+            />
+          </div>
+
+          <div class="mb-3">
+            <label for="description" class="form-label">Description</label>
+            <textarea
+              class="form-control"
+              id="description"
+              name="description"
+              rows="3"
+            ></textarea>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">YAML Source *</label>
+            <div class="form-check">
+              <input
+                class="form-check-input"
+                type="radio"
+                name="yaml_source"
+                id="editor"
+                value="editor"
+                checked
+              />
+              <label class="form-check-label" for="editor">
+                <i class="bi bi-code"></i> Write YAML in editor
+              </label>
+            </div>
+            <div class="form-check">
+              <input
+                class="form-check-input"
+                type="radio"
+                name="yaml_source"
+                id="repo"
+                value="repo"
+              />
+              <label class="form-check-label" for="repo">
+                <i class="bi bi-git"></i> Use YAML from Git repository
+              </label>
+            </div>
+          </div>
+
+          <!-- Editor YAML -->
+          <div id="editor-config">
+            <div class="mb-3">
+              <label for="yaml_content" class="form-label">Pipeline YAML</label>
+              <textarea
+                class="form-control"
+                id="yaml_content"
+                name="yaml_content"
+                rows="10"
+                style="font-family: monospace"
+              >
+env_image: ubuntu:24.10
+variables:
+  NODE_ENV: Production
+tasks:
+  - name: hello world
+    command: echo "Hello, World!"
+  
+  - name: list files
+    command: ls -la</textarea
+              >
+            </div>
+          </div>
+
+          <!-- Repository Config -->
+          <div id="repo-config" style="display: none">
+            <div class="mb-3">
+              <label for="repo_url" class="form-label">Repository URL</label>
+              <input
+                type="url"
+                class="form-control"
+                id="repo_url"
+                name="repo_url"
+                placeholder="https://github.com/username/repo.git"
+              />
+            </div>
+
+            <div class="row">
+              <div class="col-md-6">
+                <div class="mb-3">
+                  <label for="repo_branch" class="form-label">Branch</label>
+                  <input
+                    type="text"
+                    class="form-control"
+                    id="repo_branch"
+                    name="repo_branch"
+                    value="main"
+                  />
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="mb-3">
+                  <label for="yaml_file_path" class="form-label"
+                    >YAML File Path</label
+                  >
+                  <input
+                    type="text"
+                    class="form-control"
+                    id="yaml_file_path"
+                    name="yaml_file_path"
+                    value="pipeline.yml"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary">
+              <i class="bi bi-check-circle"></i> Create Pipeline
+            </button>
+            <a href="{{ url_for('web.dashboard') }}" class="btn btn-secondary"
+              >Cancel</a
+            >
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card">
+      <div class="card-header">
+        <h6><i class="bi bi-info-circle"></i> YAML Syntax Help</h6>
+      </div>
+      <div class="card-body">
+        <small>
+          <strong>Basic Structure:</strong>
+          <pre class="bg-light p-2 rounded"><code>env_image: ubuntu:24.10
+variables:
+  KEY: value
+tasks:
+  - name: task name
+    command: your command</code></pre>
+
+          <strong>Available Fields:</strong>
+          <ul class="list-unstyled mt-2">
+            <li><code>env_image</code> - Docker image</li>
+            <li><code>variables</code> - Environment vars</li>
+            <li><code>tasks</code> - List of commands</li>
+          </ul>
+        </small>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block scripts %}
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const editorRadio = document.getElementById("editor");
+    const repoRadio = document.getElementById("repo");
+    const editorConfig = document.getElementById("editor-config");
+    const repoConfig = document.getElementById("repo-config");
+
+    function toggleConfig() {
+      if (editorRadio.checked) {
+        editorConfig.style.display = "block";
+        repoConfig.style.display = "none";
+      } else {
+        editorConfig.style.display = "none";
+        repoConfig.style.display = "block";
+      }
+    }
+
+    editorRadio.addEventListener("change", toggleConfig);
+    repoRadio.addEventListener("change", toggleConfig);
+  });
+</script>
+{% endblock %}
