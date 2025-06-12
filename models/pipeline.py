@@ -1,4 +1,4 @@
-from app import db
+from extensions import db
 from datetime import datetime
 import secrets
 import string
@@ -22,7 +22,8 @@ class Pipeline(db.Model):
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.trigger_token = self.generate_trigger_token()
+        if not kwargs.get('trigger_token'):
+            self.trigger_token = self.generate_trigger_token()
     
     def generate_trigger_token(self):
         alphabet = string.ascii_letters + string.digits
@@ -84,4 +85,3 @@ class PipelinePermission(db.Model):
     granted_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-

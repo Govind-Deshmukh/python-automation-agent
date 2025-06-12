@@ -1,7 +1,8 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, session, jsonify
 from models.user import User
 from models.pipeline import Pipeline, PipelineConfiguration, PipelineExecution
-from app import db, login_required
+from extensions import db
+from app import login_required
 
 web_bp = Blueprint('web', __name__)
 

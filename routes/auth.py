@@ -1,8 +1,7 @@
-
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from models.user import User
-from app import db
+from extensions import db
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -58,4 +57,3 @@ def get_current_user():
         return jsonify({'error': 'User not found'}), 404
     
     return jsonify(user.to_dict()), 200
-

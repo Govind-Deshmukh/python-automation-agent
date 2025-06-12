@@ -1,14 +1,7 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session
-from flask_sqlalchemy import SQLAlchemy
-from flask_migrate import Migrate
-from flask_jwt_extended import JWTManager
 from config import Config
+from extensions import db, migrate, jwt
 import functools
-
-# Initialize extensions
-db = SQLAlchemy()
-migrate = Migrate()
-jwt = JWTManager()
 
 def login_required(f):
     """Decorator to require login for web routes"""
@@ -28,6 +21,9 @@ def create_app():
     migrate.init_app(app, db)
     jwt.init_app(app)
     
+    # Import models here to avoid circular imports
+    from models import user, pipeline
+    
     # Register blueprints
     from routes.auth import auth_bp
     from routes.pipelines import pipelines_bp
@@ -44,3 +40,4 @@ def create_app():
 if __name__ == '__main__':
     app = create_app()
     app.run(debug=True)
+
