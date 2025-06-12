@@ -10,7 +10,6 @@ import secrets
 import string
 from datetime import datetime
 from pathlib import Path
-from models.pipeline import PipelineExecution, PipelineConfiguration, Pipeline
 from extensions import db
 from flask import current_app
 
@@ -19,13 +18,14 @@ class PipelineExecutor:
         try:
             self.docker_client = docker.from_env()
         except Exception as e:
-            current_app.logger.error(f"Failed to initialize Docker client: {e}")
+            if current_app:
+                current_app.logger.error(f"Failed to initialize Docker client: {e}")
             self.docker_client = None
         
         # Configuration from app config or defaults
-        self.workspace = current_app.config.get('WORKSPACE_DIR', './workspace')
-        self.build_logs_dir = current_app.config.get('BUILD_LOGS_DIR', './logs/builds')
-        self.git_timeout = current_app.config.get('GIT_TIMEOUT', 300)
+        self.workspace = current_app.config.get('WORKSPACE_DIR', './workspace') if current_app else './workspace'
+        self.build_logs_dir = current_app.config.get('BUILD_LOGS_DIR', './logs/builds') if current_app else './logs/builds'
+        self.git_timeout = current_app.config.get('GIT_TIMEOUT', 300) if current_app else 300
         
         # Ensure directories exist
         os.makedirs(self.workspace, exist_ok=True)
@@ -93,38 +93,6 @@ class PipelineExecutor:
             return False
         except Exception as e:
             build_logger.error(f"Git clone error: {e}")
-            return False
-    
-    def pull_repository(self, repo_path, build_logger):
-        """Pull latest changes from a git repository"""
-        try:
-            cmd = ['git', 'pull']
-            build_logger.info(f"Executing: {' '.join(cmd)} in {repo_path}")
-            
-            result = subprocess.run(
-                cmd, 
-                cwd=repo_path, 
-                capture_output=True, 
-                text=True, 
-                timeout=self.git_timeout
-            )
-            
-            if result.returncode == 0:
-                build_logger.info(f"Git pull successful")
-                build_logger.info(f"Git pull stdout: {result.stdout}")
-                if result.stderr:
-                    build_logger.info(f"Git pull stderr: {result.stderr}")
-                return True
-            else:
-                build_logger.error(f"Git pull failed with return code: {result.returncode}")
-                build_logger.error(f"Git pull stderr: {result.stderr}")
-                return False
-                
-        except subprocess.TimeoutExpired:
-            build_logger.error(f"Git pull timed out after {self.git_timeout} seconds")
-            return False
-        except Exception as e:
-            build_logger.error(f"Git pull error: {e}")
             return False
     
     def fetch_yaml_from_repo(self, repo_url, branch, file_path, build_logger):
@@ -223,9 +191,13 @@ class PipelineExecutor:
     def execute_pipeline(self, execution_id):
         """Execute a pipeline"""
         with current_app.app_context():
+            # Import here to avoid circular imports
+            from models.pipeline import PipelineExecution, PipelineConfiguration, Pipeline
+            
             execution = PipelineExecution.query.get(execution_id)
             if not execution:
-                current_app.logger.error(f"Execution {execution_id} not found")
+                if current_app:
+                    current_app.logger.error(f"Execution {execution_id} not found")
                 return False
             
             pipeline = execution.pipeline
@@ -304,14 +276,16 @@ class PipelineExecutor:
                 execution.status = 'success'
                 execution.logs = '\n'.join(all_logs)
                 build_logger.info(f"=== PIPELINE EXECUTION SUCCESS ===")
-                current_app.logger.info(f"Pipeline {pipeline.name} executed successfully (ID: {execution_id})")
+                if current_app:
+                    current_app.logger.info(f"Pipeline {pipeline.name} executed successfully (ID: {execution_id})")
                 
             except Exception as e:
                 execution.status = 'failed'
                 execution.error_message = str(e)
                 build_logger.error(f"=== PIPELINE EXECUTION FAILED ===")
                 build_logger.error(f"Error: {e}")
-                current_app.logger.error(f"Pipeline {pipeline.name} execution failed (ID: {execution_id}): {e}")
+                if current_app:
+                    current_app.logger.error(f"Pipeline {pipeline.name} execution failed (ID: {execution_id}): {e}")
             
             finally:
                 execution.completed_at = datetime.utcnow()
@@ -338,5 +312,6 @@ class PipelineExecutor:
         thread = threading.Thread(target=self.execute_pipeline, args=(execution_id,))
         thread.daemon = True
         thread.start()
-        current_app.logger.info(f"Started async execution for pipeline execution {execution_id}")
+        if current_app:
+            current_app.logger.info(f"Started async execution for pipeline execution {execution_id}")
         return thread

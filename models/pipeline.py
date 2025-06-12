@@ -15,7 +15,7 @@ class Pipeline(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    # Relationships
+    # Relationships - using string references to avoid circular imports
     configurations = db.relationship('PipelineConfiguration', backref='pipeline', lazy=True)
     executions = db.relationship('PipelineExecution', backref='pipeline', lazy=True)
     permissions = db.relationship('PipelinePermission', backref='pipeline', lazy=True)
@@ -42,7 +42,7 @@ class Pipeline(db.Model):
             'description': self.description,
             'is_active': self.is_active,
             'created_at': self.created_at.isoformat(),
-            'owner': self.owner.username
+            'owner': self.owner.username if self.owner else 'Unknown'
         }
 
 class PipelineConfiguration(db.Model):

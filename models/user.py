@@ -12,8 +12,8 @@ class User(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    # Relationships - specify foreign_keys to resolve ambiguity
-    owned_pipelines = db.relationship('Pipeline', backref='owner', lazy=True)
+    # Relationships - using string references to avoid circular imports
+    owned_pipelines = db.relationship('Pipeline', foreign_keys='Pipeline.owner_id', backref='owner', lazy=True)
     
     # For permissions where this user is the permission holder
     pipeline_permissions = db.relationship(

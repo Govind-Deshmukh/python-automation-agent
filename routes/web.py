@@ -4,8 +4,17 @@ from models.pipeline import Pipeline, PipelineConfiguration, PipelineExecution
 from services.pipeline_executor import PipelineExecutor
 from routes.user_management import get_user_accessible_pipelines, check_pipeline_permission
 from extensions import db
-from app import login_required
 from datetime import datetime
+import functools
+
+def login_required(f):
+    """Decorator to require login for web routes"""
+    @functools.wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('web.login'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 web_bp = Blueprint('web', __name__)
 
@@ -93,9 +102,11 @@ def dashboard():
     
     # Get recent executions for accessible pipelines
     pipeline_ids = [p.id for p in pipelines]
-    recent_executions = PipelineExecution.query.filter(
-        PipelineExecution.pipeline_id.in_(pipeline_ids)
-    ).order_by(PipelineExecution.started_at.desc()).limit(5).all()
+    recent_executions = []
+    if pipeline_ids:
+        recent_executions = PipelineExecution.query.filter(
+            PipelineExecution.pipeline_id.in_(pipeline_ids)
+        ).order_by(PipelineExecution.started_at.desc()).limit(5).all()
     
     return render_template('dashboard.html', 
                          user=user, 
