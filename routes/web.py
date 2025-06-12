@@ -1,8 +1,11 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, session, jsonify
 from models.user import User
 from models.pipeline import Pipeline, PipelineConfiguration, PipelineExecution
+from services.pipeline_executor import PipelineExecutor
+from routes.user_management import get_user_accessible_pipelines, check_pipeline_permission
 from extensions import db
 from app import login_required
+from datetime import datetime
 
 web_bp = Blueprint('web', __name__)
 
@@ -84,11 +87,14 @@ def signup():
 def dashboard():
     user_id = session['user_id']
     user = User.query.get(user_id)
-    pipelines = Pipeline.query.filter_by(owner_id=user_id).all()
     
-    # Get recent executions
-    recent_executions = PipelineExecution.query.join(Pipeline).filter(
-        Pipeline.owner_id == user_id
+    # Get pipelines user can access (owned + permitted)
+    pipelines = get_user_accessible_pipelines(user_id)
+    
+    # Get recent executions for accessible pipelines
+    pipeline_ids = [p.id for p in pipelines]
+    recent_executions = PipelineExecution.query.filter(
+        PipelineExecution.pipeline_id.in_(pipeline_ids)
     ).order_by(PipelineExecution.started_at.desc()).limit(5).all()
     
     return render_template('dashboard.html', 
@@ -146,32 +152,42 @@ def create_pipeline():
 @web_bp.route('/pipelines/<int:pipeline_id>')
 @login_required
 def view_pipeline(pipeline_id):
-    pipeline = Pipeline.query.filter_by(id=pipeline_id, owner_id=session['user_id']).first()
+    # Check if user has permission to view this pipeline
+    has_permission, permission_level = check_pipeline_permission(session['user_id'], pipeline_id, 'reader')
     
-    if not pipeline:
-        flash('Pipeline not found', 'error')
+    if not has_permission:
+        flash('Pipeline not found or you do not have permission to view it', 'error')
         return redirect(url_for('web.dashboard'))
     
+    pipeline = Pipeline.query.get(pipeline_id)
     config = pipeline.get_active_configuration()
     executions = PipelineExecution.query.filter_by(pipeline_id=pipeline_id).order_by(
         PipelineExecution.started_at.desc()
     ).limit(10).all()
     
+    # Check if user is owner (for showing manage permissions link)
+    is_owner = pipeline.owner_id == session['user_id']
+    
     return render_template('view_pipeline.html', 
                          pipeline=pipeline, 
                          config=config, 
-                         executions=executions)
+                         executions=executions,
+                         is_owner=is_owner,
+                         permission_level=permission_level)
 
 @web_bp.route('/pipelines/<int:pipeline_id>/trigger', methods=['POST'])
 @login_required
 def trigger_pipeline_manual(pipeline_id):
-    pipeline = Pipeline.query.filter_by(id=pipeline_id, owner_id=session['user_id']).first()
+    # Check if user has permission to trigger this pipeline
+    has_permission, permission_level = check_pipeline_permission(session['user_id'], pipeline_id, 'developer')
     
-    if not pipeline:
-        flash('Pipeline not found', 'error')
+    if not has_permission:
+        flash('Pipeline not found or you do not have permission to trigger it', 'error')
         return redirect(url_for('web.dashboard'))
     
+    pipeline = Pipeline.query.get(pipeline_id)
     config = pipeline.get_active_configuration()
+    
     if not config:
         flash('No active configuration found', 'error')
         return redirect(url_for('web.view_pipeline', pipeline_id=pipeline_id))
@@ -182,17 +198,66 @@ def trigger_pipeline_manual(pipeline_id):
             configuration_id=config.id,
             triggered_by_user_id=session['user_id'],
             trigger_method='manual',
-            status='pending'
+            status='pending',
+            started_at=datetime.utcnow()
         )
         db.session.add(execution)
         db.session.commit()
         
+        # Execute pipeline asynchronously
+        executor = PipelineExecutor()
+        executor.execute_async(execution.id)
+        
         flash('Pipeline triggered successfully!', 'success')
+        
     except Exception as e:
         db.session.rollback()
-        flash('Failed to trigger pipeline', 'error')
+        flash(f'Failed to trigger pipeline: {str(e)}', 'error')
     
     return redirect(url_for('web.view_pipeline', pipeline_id=pipeline_id))
+
+@web_bp.route('/pipelines/<int:pipeline_id>/executions/<int:execution_id>')
+@login_required
+def view_execution(pipeline_id, execution_id):
+    """View detailed execution logs"""
+    # Check if user has permission to view this pipeline
+    has_permission, permission_level = check_pipeline_permission(session['user_id'], pipeline_id, 'reader')
+    
+    if not has_permission:
+        flash('Pipeline not found or you do not have permission to view it', 'error')
+        return redirect(url_for('web.dashboard'))
+    
+    pipeline = Pipeline.query.get(pipeline_id)
+    execution = PipelineExecution.query.filter_by(id=execution_id, pipeline_id=pipeline_id).first()
+    
+    if not execution:
+        flash('Execution not found', 'error')
+        return redirect(url_for('web.view_pipeline', pipeline_id=pipeline_id))
+    
+    return render_template('view_execution.html', pipeline=pipeline, execution=execution)
+
+@web_bp.route('/api/executions/<int:execution_id>/status')
+@login_required
+def get_execution_status(execution_id):
+    """API endpoint to get execution status (for polling)"""
+    execution = PipelineExecution.query.get(execution_id)
+    
+    if not execution:
+        return jsonify({'error': 'Execution not found'}), 404
+    
+    # Check if user has permission to view this pipeline
+    has_permission, _ = check_pipeline_permission(session['user_id'], execution.pipeline_id, 'reader')
+    
+    if not has_permission:
+        return jsonify({'error': 'Permission denied'}), 403
+    
+    return jsonify({
+        'id': execution.id,
+        'status': execution.status,
+        'started_at': execution.started_at.isoformat() if execution.started_at else None,
+        'completed_at': execution.completed_at.isoformat() if execution.completed_at else None,
+        'error_message': execution.error_message
+    })
 
 @web_bp.route('/logout')
 def logout():

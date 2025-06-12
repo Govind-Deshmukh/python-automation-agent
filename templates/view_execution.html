@@ -1,0 +1,247 @@
+{% extends "base.html" %} {% block title %}Execution #{{ execution.id }} - {{
+pipeline.name }} - CI/CD Platform{% endblock %} {% block content %}
+<div class="row mt-4">
+  <div class="col-12">
+    <div class="d-flex align-items-center mb-4">
+      <a
+        href="{{ url_for('web.view_pipeline', pipeline_id=pipeline.id) }}"
+        class="btn btn-outline-secondary me-3"
+      >
+        <i class="bi bi-arrow-left"></i> Back to Pipeline
+      </a>
+      <div class="flex-grow-1">
+        <h2><i class="bi bi-play-circle"></i> Execution #{{ execution.id }}</h2>
+        <p class="text-muted mb-0">
+          Pipeline: <strong>{{ pipeline.name }}</strong>
+        </p>
+      </div>
+      <div class="d-flex align-items-center gap-3">
+        <span
+          class="badge fs-6 bg-{% if execution.status == 'success' %}success{% elif execution.status == 'failed' %}danger{% elif execution.status == 'running' %}warning{% elif execution.status == 'pending' %}info{% else %}secondary{% endif %}"
+        >
+          <i
+            class="bi bi-{% if execution.status == 'success' %}check-circle{% elif execution.status == 'failed' %}x-circle{% elif execution.status == 'running' %}arrow-clockwise{% elif execution.status == 'pending' %}clock{% else %}question-circle{% endif %}"
+          ></i>
+          {{ execution.status.title() }}
+        </span>
+        {% if execution.status in ['pending', 'running'] %}
+        <button
+          class="btn btn-sm btn-outline-primary"
+          onclick="refreshStatus()"
+        >
+          <i class="bi bi-arrow-clockwise"></i> Refresh
+        </button>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="col-lg-4">
+    <div class="card mb-4">
+      <div class="card-header">
+        <h6><i class="bi bi-info-circle"></i> Execution Details</h6>
+      </div>
+      <div class="card-body">
+        <table class="table table-sm table-borderless">
+          <tr>
+            <th width="40%">ID:</th>
+            <td>#{{ execution.id }}</td>
+          </tr>
+          <tr>
+            <th>Status:</th>
+            <td>
+              <span
+                class="badge bg-{% if execution.status == 'success' %}success{% elif execution.status == 'failed' %}danger{% elif execution.status == 'running' %}warning{% elif execution.status == 'pending' %}info{% else %}secondary{% endif %}"
+              >
+                {{ execution.status.title() }}
+              </span>
+            </td>
+          </tr>
+          <tr>
+            <th>Trigger Method:</th>
+            <td>
+              <span class="badge bg-secondary">
+                <i
+                  class="bi bi-{% if execution.trigger_method == 'manual' %}hand-index{% else %}webhook{% endif %}"
+                ></i>
+                {{ execution.trigger_method.title() }}
+              </span>
+            </td>
+          </tr>
+          {% if execution.triggered_by_user %}
+          <tr>
+            <th>Triggered By:</th>
+            <td>{{ execution.triggered_by_user.username }}</td>
+          </tr>
+          {% endif %}
+          <tr>
+            <th>Started:</th>
+            <td>
+              {% if execution.started_at %}
+              <small
+                >{{ execution.started_at.strftime('%Y-%m-%d %H:%M:%S') }}</small
+              >
+              {% else %}
+              <small class="text-muted">Not started</small>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th>Completed:</th>
+            <td>
+              {% if execution.completed_at %}
+              <small
+                >{{ execution.completed_at.strftime('%Y-%m-%d %H:%M:%S')
+                }}</small
+              >
+              {% else %}
+              <small class="text-muted"
+                >{% if execution.status == 'running' %}In progress...{% else
+                %}Not completed{% endif %}</small
+              >
+              {% endif %}
+            </td>
+          </tr>
+          {% if execution.started_at and execution.completed_at %}
+          <tr>
+            <th>Duration:</th>
+            <td>
+              <small
+                >{{ ((execution.completed_at -
+                execution.started_at).total_seconds() / 60) | round(2) }}
+                minutes</small
+              >
+            </td>
+          </tr>
+          {% endif %}
+        </table>
+      </div>
+    </div>
+
+    {% if execution.error_message %}
+    <div class="card mb-4">
+      <div class="card-header bg-danger text-white">
+        <h6 class="mb-0">
+          <i class="bi bi-exclamation-triangle"></i> Error Details
+        </h6>
+      </div>
+      <div class="card-body">
+        <pre
+          class="text-danger mb-0"
+        ><code>{{ execution.error_message }}</code></pre>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="col-lg-8">
+    <div class="card">
+      <div
+        class="card-header d-flex justify-content-between align-items-center"
+      >
+        <h6 class="mb-0"><i class="bi bi-terminal"></i> Execution Logs</h6>
+        {% if execution.status in ['pending', 'running'] %}
+        <small class="text-muted">
+          <i class="bi bi-arrow-clockwise spinning"></i>
+          Auto-refreshing...
+        </small>
+        {% endif %}
+      </div>
+      <div class="card-body p-0">
+        {% if execution.logs %}
+        <pre
+          class="bg-dark text-light p-3 mb-0"
+          style="max-height: 600px; overflow-y: auto; white-space: pre-wrap"
+          id="execution-logs"
+        ><code>{{ execution.logs }}</code></pre>
+        {% elif execution.status == 'pending' %}
+        <div class="p-4 text-center text-muted">
+          <i class="bi bi-clock fs-1"></i>
+          <h6 class="mt-2">Execution Pending</h6>
+          <p>The pipeline execution is queued and will start shortly...</p>
+        </div>
+        {% elif execution.status == 'running' %}
+        <div class="p-4 text-center text-muted">
+          <i class="bi bi-arrow-clockwise fs-1 spinning"></i>
+          <h6 class="mt-2">Execution Running</h6>
+          <p>The pipeline is currently executing. Logs will appear here...</p>
+        </div>
+        {% else %}
+        <div class="p-4 text-center text-muted">
+          <i class="bi bi-journal-x fs-1"></i>
+          <h6 class="mt-2">No Logs Available</h6>
+          <p>No execution logs were generated for this run.</p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %} {% block scripts %}
+<style>
+  .spinning {
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    0% {
+      transform: rotate(0deg);
+    }
+    100% {
+      transform: rotate(360deg);
+    }
+  }
+</style>
+
+<script>
+  let refreshInterval;
+
+  function refreshStatus() {
+    fetch(`/api/executions/{{ execution.id }}/status`)
+      .then(response => response.json())
+      .then(data => {
+        if (data.error) {
+          console.error('Failed to fetch status:', data.error);
+          return;
+        }
+
+        // If status changed to completed, refresh the page
+        if (data.status !== '{{ execution.status }}' &&
+            ['success', 'failed', 'cancelled'].includes(data.status)) {
+          location.reload();
+        }
+      })
+      .catch(error => {
+        console.error('Error fetching status:', error);
+      });
+  }
+
+  // Auto-refresh for running/pending executions
+  {% if execution.status in ['pending', 'running'] %}
+  refreshInterval = setInterval(refreshStatus, 5000); // Refresh every 5 seconds
+
+  // Stop auto-refresh when page is not visible
+  document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+      if (refreshInterval) {
+        clearInterval(refreshInterval);
+      }
+    } else {
+      if (!refreshInterval) {
+        refreshInterval = setInterval(refreshStatus, 5000);
+      }
+    }
+  });
+
+  // Clean up interval when page unloads
+  window.addEventListener('beforeunload', function() {
+    if (refreshInterval) {
+      clearInterval(refreshInterval);
+    }
+  });
+  {% endif %}
+</script>
+{% endblock %}
